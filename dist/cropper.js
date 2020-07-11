@@ -393,7 +393,7 @@ var es6Promise = createCommonjsModule(function (module, exports) {
    * @copyright Copyright (c) 2014 Yehuda Katz, Tom Dale, Stefan Penner and contributors (Conversion to ES6 API by Jake Archibald)
    * @license   Licensed under MIT license
    *            See https://raw.githubusercontent.com/stefanpenner/es6-promise/master/LICENSE
-   * @version   v4.2.4+314e4831
+   * @version   v4.2.8+1e68dce6
    */
 
   (function (global, factory) {
@@ -620,23 +620,12 @@ var es6Promise = createCommonjsModule(function (module, exports) {
     var FULFILLED = 1;
     var REJECTED = 2;
 
-    var TRY_CATCH_ERROR = { error: null };
-
     function selfFulfillment() {
       return new TypeError("You cannot resolve a promise with itself");
     }
 
     function cannotReturnOwn() {
       return new TypeError('A promises callback cannot return that same promise.');
-    }
-
-    function getThen(promise) {
-      try {
-        return promise.then;
-      } catch (error) {
-        TRY_CATCH_ERROR.error = error;
-        return TRY_CATCH_ERROR;
-      }
     }
 
     function tryThen(then$$1, value, fulfillmentHandler, rejectionHandler) {
@@ -694,10 +683,7 @@ var es6Promise = createCommonjsModule(function (module, exports) {
       if (maybeThenable.constructor === promise.constructor && then$$1 === then && maybeThenable.constructor.resolve === resolve$1) {
         handleOwnThenable(promise, maybeThenable);
       } else {
-        if (then$$1 === TRY_CATCH_ERROR) {
-          reject(promise, TRY_CATCH_ERROR.error);
-          TRY_CATCH_ERROR.error = null;
-        } else if (then$$1 === undefined) {
+        if (then$$1 === undefined) {
           fulfill(promise, maybeThenable);
         } else if (isFunction(then$$1)) {
           handleForeignThenable(promise, maybeThenable, then$$1);
@@ -711,7 +697,14 @@ var es6Promise = createCommonjsModule(function (module, exports) {
       if (promise === value) {
         reject(promise, selfFulfillment());
       } else if (objectOrFunction(value)) {
-        handleMaybeThenable(promise, value, getThen(value));
+        var then$$1 = void 0;
+        try {
+          then$$1 = value.then;
+        } catch (error) {
+          reject(promise, error);
+          return;
+        }
+        handleMaybeThenable(promise, value, then$$1);
       } else {
         fulfill(promise, value);
       }
@@ -789,31 +782,18 @@ var es6Promise = createCommonjsModule(function (module, exports) {
       promise._subscribers.length = 0;
     }
 
-    function tryCatch(callback, detail) {
-      try {
-        return callback(detail);
-      } catch (e) {
-        TRY_CATCH_ERROR.error = e;
-        return TRY_CATCH_ERROR;
-      }
-    }
-
     function invokeCallback(settled, promise, callback, detail) {
       var hasCallback = isFunction(callback),
           value = void 0,
           error = void 0,
-          succeeded = void 0,
-          failed = void 0;
+          succeeded = true;
 
       if (hasCallback) {
-        value = tryCatch(callback, detail);
-
-        if (value === TRY_CATCH_ERROR) {
-          failed = true;
-          error = value.error;
-          value.error = null;
-        } else {
-          succeeded = true;
+        try {
+          value = callback(detail);
+        } catch (e) {
+          succeeded = false;
+          error = e;
         }
 
         if (promise === value) {
@@ -822,14 +802,13 @@ var es6Promise = createCommonjsModule(function (module, exports) {
         }
       } else {
         value = detail;
-        succeeded = true;
       }
 
       if (promise._state !== PENDING) {
         // noop
       } else if (hasCallback && succeeded) {
         resolve(promise, value);
-      } else if (failed) {
+      } else if (succeeded === false) {
         reject(promise, error);
       } else if (settled === FULFILLED) {
         fulfill(promise, value);
@@ -906,7 +885,15 @@ var es6Promise = createCommonjsModule(function (module, exports) {
         var resolve$$1 = c.resolve;
 
         if (resolve$$1 === resolve$1) {
-          var _then = getThen(entry);
+          var _then = void 0;
+          var error = void 0;
+          var didError = false;
+          try {
+            _then = entry.then;
+          } catch (e) {
+            didError = true;
+            error = e;
+          }
 
           if (_then === then && entry._state !== PENDING) {
             this._settledAt(entry._state, i, entry._result);
@@ -915,7 +902,11 @@ var es6Promise = createCommonjsModule(function (module, exports) {
             this._result[i] = entry;
           } else if (c === Promise$1) {
             var promise = new c(noop);
-            handleMaybeThenable(promise, entry, _then);
+            if (didError) {
+              reject(promise, error);
+            } else {
+              handleMaybeThenable(promise, entry, _then);
+            }
             this._willSettleAt(promise, i);
           } else {
             this._willSettleAt(new c(function (resolve$$1) {
@@ -1490,15 +1481,19 @@ var es6Promise = createCommonjsModule(function (module, exports) {
         var promise = this;
         var constructor = promise.constructor;
 
-        return promise.then(function (value) {
-          return constructor.resolve(callback()).then(function () {
-            return value;
+        if (isFunction(callback)) {
+          return promise.then(function (value) {
+            return constructor.resolve(callback()).then(function () {
+              return value;
+            });
+          }, function (reason) {
+            return constructor.resolve(callback()).then(function () {
+              throw reason;
+            });
           });
-        }, function (reason) {
-          return constructor.resolve(callback()).then(function () {
-            throw reason;
-          });
-        });
+        }
+
+        return promise.then(callback, callback);
       };
 
       return Promise;
@@ -1747,62 +1742,18 @@ var Image = function (_Element) {
  * Class representing a drawing context on the canvas
  */
 var Context = function () {
-  /**
-   * Create a context
-   */
-  function Context(context) {
-    classCallCheck(this, Context);
-
-    this._context = context;
-  }
-
-  /**
-   * Draws a filled rectangle at (x, y) position whose size is determined by width and height and whose style
-   * is determined by the fillStyle attribute.
-   *
-   * @param {Number} x - The x axis of the coordinate for the rectangle starting point.
-   * @param {Number} y - The y axis of the coordinate for the rectangle starting point.
-   * @param {Number} width - The rectangle's width.
-   * @param {Number} height - The rectangle's height.
-   */
-
-
-  createClass(Context, [{
-    key: "fillRect",
-    value: function fillRect(x, y, width, height) {
-      return this._context.fillRect(x, y, width, height);
-    }
-
     /**
-     * Sets a property of the Canvas 2D API, which specifies the color or style to use inside shapes.
-     *
-     * @param {String|Object} style - A CSS <color> value, Canvas gradient or Canvas pattern
+     * Create a context
      */
+    function Context(context) {
+        classCallCheck(this, Context);
 
-  }, {
-    key: "fillStyle",
-    value: function fillStyle(style) {
-      return this._context.fillStyle = style;
+        this._context = context;
     }
 
     /**
-     * Creates a pattern using the specified image (a CanvasImageSource).
-     * It repeats the source in the directions specified by the repetition argument.
-     *
-     * @param {CanvasImageSource} image - A CanvasImageSource to be used as image to repeat.
-     * @param {String} repetition - A DOMString indicating how to repeat the image.
-     */
-
-  }, {
-    key: "createPattern",
-    value: function createPattern(image, repetition) {
-      return this._context.createPattern(image, repetition);
-    }
-
-    /**
-     * Creates a path for a rectangle at position (x, y) with a size that is determined by width and height.
-     * Those four points are connected by straight lines and the sub-path is marked as closed,
-     * so that you can fill or stroke this rectangle.
+     * Draws a filled rectangle at (x, y) position whose size is determined by width and height and whose style
+     * is determined by the fillStyle attribute.
      *
      * @param {Number} x - The x axis of the coordinate for the rectangle starting point.
      * @param {Number} y - The y axis of the coordinate for the rectangle starting point.
@@ -1810,116 +1761,160 @@ var Context = function () {
      * @param {Number} height - The rectangle's height.
      */
 
-  }, {
-    key: "rect",
-    value: function rect(x, y, width, height) {
-      return this._context.rect(x, y, width, height);
-    }
 
-    /**
-     * Fills the current or given path with the current fill style using the non-zero or even-odd winding rule.
-     */
+    createClass(Context, [{
+        key: "fillRect",
+        value: function fillRect(x, y, width, height) {
+            return this._context.fillRect(x, y, width, height);
+        }
 
-  }, {
-    key: "fill",
-    value: function fill() {
-      return this._context.fill();
-    }
+        /**
+         * Sets a property of the Canvas 2D API, which specifies the color or style to use inside shapes.
+         *
+         * @param {String|Object} style - A CSS <color> value, Canvas gradient or Canvas pattern
+         */
 
-    /**
-     * Starts a new path by emptying the list of sub-paths. Call this method when you want to create a new path.
-     */
+    }, {
+        key: "fillStyle",
+        value: function fillStyle(style) {
+            return this._context.fillStyle = style;
+        }
 
-  }, {
-    key: "beginPath",
-    value: function beginPath() {
-      return this._context.beginPath();
-    }
+        /**
+         * Creates a pattern using the specified image (a CanvasImageSource).
+         * It repeats the source in the directions specified by the repetition argument.
+         *
+         * @param {CanvasImageSource} image - A CanvasImageSource to be used as image to repeat.
+         * @param {String} repetition - A DOMString indicating how to repeat the image.
+         */
 
-    /**
-     * Moves the starting point of a new sub-path to the (x, y) coordinates.
-     *
-     * @param {Number} x -The x axis of the point.
-     * @param {Number} y -The y axis of the point.
-     */
+    }, {
+        key: "createPattern",
+        value: function createPattern(image, repetition) {
+            return this._context.createPattern(image, repetition);
+        }
 
-  }, {
-    key: "moveTo",
-    value: function moveTo(x, y) {
-      return this._context.moveTo(x, y);
-    }
+        /**
+         * Creates a path for a rectangle at position (x, y) with a size that is determined by width and height.
+         * Those four points are connected by straight lines and the sub-path is marked as closed,
+         * so that you can fill or stroke this rectangle.
+         *
+         * @param {Number} x - The x axis of the coordinate for the rectangle starting point.
+         * @param {Number} y - The y axis of the coordinate for the rectangle starting point.
+         * @param {Number} width - The rectangle's width.
+         * @param {Number} height - The rectangle's height.
+         */
 
-    /**
-     * Connects the last point in the sub-path to the x, y coordinates with a straight line
-     * (but does not actually draw it).
-     *
-     * @param {Number} x - The x axis of the coordinate for the end of the line.
-     * @param {Number} y - The y axis of the coordinate for the end of the line.
-     */
+    }, {
+        key: "rect",
+        value: function rect(x, y, width, height) {
+            return this._context.rect(x, y, width, height);
+        }
 
-  }, {
-    key: "lineTo",
-    value: function lineTo(x, y) {
-      return this._context.lineTo(x, y);
-    }
+        /**
+         * Fills the current or given path with the current fill style using the non-zero or even-odd winding rule.
+         */
 
-    /**
-     * Causes the point of the pen to move back to the start of the current sub-path.
-     * It tries to add a straight line (but does not actually draw it) from the current point to the start.
-     * If the shape has already been closed or has only one point, this function does nothing.
-     */
+    }, {
+        key: "fill",
+        value: function fill() {
+            return this._context.fill();
+        }
 
-  }, {
-    key: "closePath",
-    value: function closePath() {
-      return this._context.closePath();
-    }
+        /**
+         * Starts a new path by emptying the list of sub-paths. Call this method when you want to create a new path.
+         */
 
-    /**
-     * Sets all pixels in the rectangle defined by starting point (x, y) and size (width, height) to transparent black,
-     * erasing any previously drawn content.
-     *
-     * @param {Number} x - The x axis of the coordinate for the rectangle starting point.
-     * @param {Number} y - The y axis of the coordinate for the rectangle starting point.
-     * @param {Number} width - The rectangle's width.
-     * @param {Number} height - The rectangle's height.
-     */
+    }, {
+        key: "beginPath",
+        value: function beginPath() {
+            return this._context.beginPath();
+        }
 
-  }, {
-    key: "clearRect",
-    value: function clearRect(x, y, width, height) {
-      return this._context.clearRect(x, y, width, height);
-    }
+        /**
+         * Moves the starting point of a new sub-path to the (x, y) coordinates.
+         *
+         * @param {Number} x -The x axis of the point.
+         * @param {Number} y -The y axis of the point.
+         */
 
-    /**
-     * Provides different ways to draw an image onto the canvas.
-     *
-     * @param {Number} image - An element to draw into the context.
-     * @param {Number} sx - The X coordinate of the top left corner of the sub-rectangle of the source image to draw
-     * into the destination context.
-     * @param {Number} sy - The Y coordinate of the top left corner of the sub-rectangle of the source image to draw
-     * into the destination context.
-     * @param {Number} sWidth - The width of the sub-rectangle of the source image to draw into the destination context.
-     * @param {Number} sHeight - The height of the sub-rectangle of the source image to draw into the destination context.
-     * @param {Number} dx - The X coordinate in the destination canvas at which to place the top-left corner
-     * of the source image.
-     * @param {Number} dy - The Y coordinate in the destination canvas at which to place the top-left corner
-     * of the source image.
-     * @param {Number} dWidth - The width to draw the image in the destination canvas.
-     * @param {Number} dHeight - The height to draw the image in the destination canvas.
-     */
+    }, {
+        key: "moveTo",
+        value: function moveTo(x, y) {
+            return this._context.moveTo(x, y);
+        }
 
-  }, {
-    key: "drawImage",
-    value: function drawImage() {
-      for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
-        args[_key] = arguments[_key];
-      }
+        /**
+         * Connects the last point in the sub-path to the x, y coordinates with a straight line
+         * (but does not actually draw it).
+         *
+         * @param {Number} x - The x axis of the coordinate for the end of the line.
+         * @param {Number} y - The y axis of the coordinate for the end of the line.
+         */
 
-      return this._context.drawImage.apply(this._context, args);
-    }
-  }]);
-  return Context;
+    }, {
+        key: "lineTo",
+        value: function lineTo(x, y) {
+            return this._context.lineTo(x, y);
+        }
+
+        /**
+         * Causes the point of the pen to move back to the start of the current sub-path.
+         * It tries to add a straight line (but does not actually draw it) from the current point to the start.
+         * If the shape has already been closed or has only one point, this function does nothing.
+         */
+
+    }, {
+        key: "closePath",
+        value: function closePath() {
+            return this._context.closePath();
+        }
+
+        /**
+         * Sets all pixels in the rectangle defined by starting point (x, y) and size (width, height) to transparent black,
+         * erasing any previously drawn content.
+         *
+         * @param {Number} x - The x axis of the coordinate for the rectangle starting point.
+         * @param {Number} y - The y axis of the coordinate for the rectangle starting point.
+         * @param {Number} width - The rectangle's width.
+         * @param {Number} height - The rectangle's height.
+         */
+
+    }, {
+        key: "clearRect",
+        value: function clearRect(x, y, width, height) {
+            return this._context.clearRect(x, y, width, height);
+        }
+
+        /**
+         * Provides different ways to draw an image onto the canvas.
+         *
+         * @param {Number} image - An element to draw into the context.
+         * @param {Number} sx - The X coordinate of the top left corner of the sub-rectangle of the source image to draw
+         * into the destination context.
+         * @param {Number} sy - The Y coordinate of the top left corner of the sub-rectangle of the source image to draw
+         * into the destination context.
+         * @param {Number} sWidth - The width of the sub-rectangle of the source image to draw into the destination context.
+         * @param {Number} sHeight - The height of the sub-rectangle of the source image to draw into the destination context.
+         * @param {Number} dx - The X coordinate in the destination canvas at which to place the top-left corner
+         * of the source image.
+         * @param {Number} dy - The Y coordinate in the destination canvas at which to place the top-left corner
+         * of the source image.
+         * @param {Number} dWidth - The width to draw the image in the destination canvas.
+         * @param {Number} dHeight - The height to draw the image in the destination canvas.
+         */
+
+    }, {
+        key: "drawImage",
+        value: function drawImage() {
+            for (var _len = arguments.length, args = Array(_len), _key = 0; _key < _len; _key++) {
+                args[_key] = arguments[_key];
+            }
+
+            return this._context.drawImage.apply(this._context, args);
+        }
+    }]);
+    return Context;
 }();
 
 /**
@@ -1985,8 +1980,6 @@ function Point() {
   this.y = y;
 };
 
-var frameProportion = 0.85;
-
 /**
  * Class representing a Frame element
  */
@@ -1998,7 +1991,8 @@ var Frame = function () {
     function Frame() {
         classCallCheck(this, Frame);
 
-        this._size = 0;
+        this._width = 0;
+        this._height = 0;
         this._origin = {
             x: 0,
             y: 0
@@ -2016,7 +2010,8 @@ var Frame = function () {
     createClass(Frame, [{
         key: "update",
         value: function update(parent) {
-            this._size = parent.width > parent.height ? parent.height * frameProportion : parent.width * frameProportion;
+            this._width = parent.width;
+            this._height = parent.height;
             this._origin = {
                 x: (parent.width - this._size) / 2,
                 y: (parent.height - this._size) / 2
@@ -2037,7 +2032,7 @@ var Frame = function () {
         value: function getRect() {
             return {
                 origin: new Point(this._origin.x, this._origin.y),
-                size: new Size(this._size, this._size)
+                size: new Size(this._width, this._height)
             };
         }
 
@@ -2062,7 +2057,7 @@ var Frame = function () {
     }, {
         key: "getMaxX",
         value: function getMaxX() {
-            return this._origin.x + this._size;
+            return this._origin.x + this._width;
         }
 
         /**
@@ -2074,7 +2069,7 @@ var Frame = function () {
     }, {
         key: "getMidX",
         value: function getMidX() {
-            return this._origin.x + this._size / 2;
+            return this._origin.x + this._width / 2;
         }
 
         /**
@@ -2098,7 +2093,7 @@ var Frame = function () {
     }, {
         key: "getMaxY",
         value: function getMaxY() {
-            return this._origin.y + this._size;
+            return this._origin.y + this._height;
         }
 
         /**
@@ -2110,7 +2105,7 @@ var Frame = function () {
     }, {
         key: "getMidY",
         value: function getMidY() {
-            return this._origin.y + this._size / 2;
+            return this._origin.y + this._height / 2;
         }
     }]);
     return Frame;
@@ -2695,69 +2690,69 @@ var Canvas = function (_Element) {
  */
 
 var Slider = function (_Element) {
-  inherits(Slider, _Element);
+    inherits(Slider, _Element);
 
-  /**
-   * Create a slider.
-   */
-  function Slider() {
-    classCallCheck(this, Slider);
+    /**
+     * Create a slider.
+     */
+    function Slider() {
+        classCallCheck(this, Slider);
 
-    var _this = possibleConstructorReturn(this, (Slider.__proto__ || Object.getPrototypeOf(Slider)).call(this, "input"));
+        var _this = possibleConstructorReturn(this, (Slider.__proto__ || Object.getPrototypeOf(Slider)).call(this, "input"));
 
-    _this.setType("range");
-    _this.addClass("slider");
-    _this.setAttribute("min", 0);
-    _this.setAttribute("max", 100);
-    _this.setAttribute("value", 0);
+        _this.setType("range");
+        _this.addClass("slider");
+        _this.setAttribute("min", 0);
+        _this.setAttribute("max", 100);
+        _this.setAttribute("value", 0);
 
-    _this._onChangeCallback = function () {};
-    _this._onChangeHandler = _this._onChange.bind(_this);
-    return _this;
-  }
-
-  /**
-   * Callback function, which be fired after changing the value
-   *
-   * @param {Function} callback - Callback.
-   * @returns {Slider} - A Slider object.
-   */
-
-
-  createClass(Slider, [{
-    key: "onChange",
-    value: function onChange(callback) {
-      this._onChangeCallback = callback;
-      this.getNode().addEventListener("change", this._onChangeHandler, false);
-      this.getNode().addEventListener("input", this._onChangeHandler, false);
-      return this;
+        _this._onChangeCallback = function () {};
+        _this._onChangeHandler = _this._onChange.bind(_this);
+        return _this;
     }
 
     /**
-     * Sets a value
+     * Callback function, which be fired after changing the value
      *
-     * @param {Number} value - A value from 0 to 100
+     * @param {Function} callback - Callback.
      * @returns {Slider} - A Slider object.
      */
 
-  }, {
-    key: "setValue",
-    value: function setValue(value) {
-      this.getNode().value = value;
-      return this;
-    }
 
-    /**
-     * Fires custom callback.
-     */
+    createClass(Slider, [{
+        key: "onChange",
+        value: function onChange(callback) {
+            this._onChangeCallback = callback;
+            this.getNode().addEventListener("change", this._onChangeHandler, false);
+            this.getNode().addEventListener("input", this._onChangeHandler, false);
+            return this;
+        }
 
-  }, {
-    key: "_onChange",
-    value: function _onChange() {
-      this._onChangeCallback(Number(this.getNode().value));
-    }
-  }]);
-  return Slider;
+        /**
+         * Sets a value
+         *
+         * @param {Number} value - A value from 0 to 100
+         * @returns {Slider} - A Slider object.
+         */
+
+    }, {
+        key: "setValue",
+        value: function setValue(value) {
+            this.getNode().value = value;
+            return this;
+        }
+
+        /**
+         * Fires custom callback.
+         */
+
+    }, {
+        key: "_onChange",
+        value: function _onChange() {
+            this._onChangeCallback(Number(this.getNode().value));
+        }
+    }]);
+    return Slider;
 }(Element);
 
 /**

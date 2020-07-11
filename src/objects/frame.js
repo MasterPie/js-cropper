@@ -11,7 +11,8 @@ export default class Frame {
      * Create a frame
      */
     constructor() {
-        this._size = 0;
+        this._width = 0;
+        this._height = 0;
         this._origin = {
             x: 0,
             y: 0,
@@ -25,7 +26,8 @@ export default class Frame {
      * @return {Pattern} A Pattern object.
      */
     update(parent) {
-        this._size = (parent.width > parent.height) ? parent.height * frameProportion : parent.width * frameProportion;
+        this._width = parent.width;
+        this._height = parent.height;
         this._origin = {
             x: (parent.width - this._size) / 2,
             y: (parent.height - this._size) / 2,
@@ -43,7 +45,7 @@ export default class Frame {
     getRect() {
         return {
             origin: new Point(this._origin.x, this._origin.y),
-            size: new Size(this._size, this._size),
+            size: new Size(this._width, this._height),
         }
     }
 
@@ -62,7 +64,7 @@ export default class Frame {
      * @return {Number} - The largest value of the x-coordinate for the rectangle.
      */
     getMaxX() {
-        return this._origin.x + this._size;
+        return this._origin.x + this._width;
     }
 
     /**
@@ -71,7 +73,7 @@ export default class Frame {
      * @returns {Number} - The x-coordinate that establishes the center of a rectangle.
      */
     getMidX() {
-        return this._origin.x + (this._size / 2);
+        return this._origin.x + (this._width / 2);
     }
 
     /**
@@ -89,7 +91,7 @@ export default class Frame {
      * @return {Number} - The largest value of the x-coordinate for the rectangle.
      */
     getMaxY() {
-        return this._origin.y + this._size;
+        return this._origin.y + this._height;
     }
 
     /**
@@ -98,6 +100,6 @@ export default class Frame {
      * @returns {Number} - The y-coordinate that establishes the center of a rectangle.
      */
     getMidY() {
-        return this._origin.y + (this._size / 2);
+        return this._origin.y + (this._height / 2);
     }
 };
